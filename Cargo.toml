@@ -3,6 +3,7 @@ members = [
     "crates/*",
     "examples/clients",
     "examples/servers",
+    "examples/server_tool_macros",
     "examples/macros"
 ]
 resolver = "2"

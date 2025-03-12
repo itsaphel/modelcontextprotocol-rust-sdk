@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::Tool;
+
 #[non_exhaustive]
 #[derive(Error, Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum ToolError {
@@ -70,4 +72,10 @@ pub trait ResourceTemplateHandler: Send + Sync + 'static {
 pub fn generate_schema<T: JsonSchema>() -> ToolResult<Value> {
     let schema = schemars::schema_for!(T);
     serde_json::to_value(schema).map_err(|e| ToolError::SchemaError(e.to_string()))
+}
+
+impl From<&Box<dyn ToolHandler>> for Tool {
+    fn from(handler: &Box<dyn ToolHandler>) -> Self {
+        Tool::new(handler.name(), handler.description(), handler.schema())
+    }
 }
