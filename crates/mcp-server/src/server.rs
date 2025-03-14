@@ -1,11 +1,24 @@
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use mcp_core::{handler::{PromptError, ResourceError, ToolHandler}, prompt::Prompt, Content, Tool, ToolError};
-use mcp_server::{router::CapabilitiesBuilder, Router};
+use crate::{router::CapabilitiesBuilder, Router};
 
-#[derive(Clone, Default)]
+/// A higher-level server that handles MCP requests.
+#[derive(Clone)]
 pub struct MCPServer {
+    pub name: String,
+    pub description: String,
     pub tools: HashMap<String, Arc<dyn ToolHandler>>,
+}
+
+impl MCPServer {
+    pub fn new(name: String, description: String) -> Self {
+        Self { name, description, tools: HashMap::new() }
+    }
+
+    pub fn register_tool(&mut self, tool: impl ToolHandler) {
+        self.tools.insert(tool.name().to_string(), Arc::new(tool));
+    }
 }
 
 impl Router for MCPServer {
@@ -14,16 +27,16 @@ impl Router for MCPServer {
     }
     
     fn name(&self) -> String {
-        "Stateless server".to_string()
+        self.name.clone()
     }
     
     fn instructions(&self) -> String {
-        "This server provides a calculator tool that can perform basic arithmetic operations. Use the 'calculator' tool to perform calculations.".to_string()
+        self.description.clone()
     }
     
     fn capabilities(&self) -> mcp_core::protocol::ServerCapabilities {
         CapabilitiesBuilder::new()
-            .with_tools(true)
+            .with_tools(self.tools.len() > 0)
             .with_resources(false, false)
             .with_prompts(false)
             .build()
@@ -43,7 +56,9 @@ impl Router for MCPServer {
                 serde_json::Value::Bool(b) => vec![Content::text(b.to_string())],
                 serde_json::Value::Array(_) => serde_json::from_value(res)
                     .map_err(|e| ToolError::ExecutionError(e.to_string()))?,
-                _ => vec![Content::text(format!("{:?}", res))],
+                serde_json::Value::Null => vec![],
+                serde_json::Value::Object(_) => serde_json::from_value(res)
+                    .map_err(|e| ToolError::ExecutionError(e.to_string()))?,
             };
             
             Ok(contents)

@@ -14,6 +14,8 @@ pub use errors::{BoxError, RouterError, ServerError, TransportError};
 
 pub mod router;
 pub use router::Router;
+pub mod server;
+pub use server::MCPServer;
 
 /// A transport layer that handles JSON-RPC messages over byte
 #[pin_project]

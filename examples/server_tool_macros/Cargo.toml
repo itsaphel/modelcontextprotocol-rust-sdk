@@ -29,5 +29,5 @@ name = "counter-server"
 path = "src/counter_server.rs"
 
 [[example]]
-name = "stateless-server"
-path = "src/stateless_calculator_server.rs"
+name = "calculator-server"
+path = "src/calculator_server.rs"

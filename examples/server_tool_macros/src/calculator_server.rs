@@ -1,16 +1,14 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use common::MCPServer;
 use mcp_core::ToolError;
 use mcp_macros::tool;
 use mcp_server::router::RouterService;
-use mcp_server::{ByteTransport, Server};
+use mcp_server::{ByteTransport, Server, MCPServer};
 use tokio::io::{stdin, stdout};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{self, EnvFilter};
 
-mod common;
 
 #[tool(
     name = "calculator",
@@ -58,7 +56,10 @@ async fn main() -> Result<()> {
     tracing::info!("Starting MCP server");
 
     // Create the server and add our tools
-    let mut mcp_server = MCPServer::default();
+    let mut mcp_server = MCPServer::new(
+        "Calculator".to_string(),
+        "This server provides a calculator tool that can perform basic arithmetic operations. Use the 'calculator' tool to perform calculations.".to_string()
+    );
     mcp_server.tools.insert("calculator".to_string(), Arc::new(Calculator));
 
     // Create and run the server

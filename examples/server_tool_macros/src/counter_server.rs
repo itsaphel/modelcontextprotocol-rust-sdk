@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use common::MCPServer;
 use mcp_core::ToolError;
 use mcp_macros::tool;
 use mcp_server::router::RouterService;
-use mcp_server::{ByteTransport, Server};
+use mcp_server::{ByteTransport, Server, MCPServer};
 use tokio::io::{stdin, stdout};
 use tokio::sync::Mutex;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{self, EnvFilter};
-
-mod common;
 
 #[derive(Clone, Default)]
 pub struct Counter {
@@ -43,8 +40,25 @@ impl Counter {
 )]
 async fn increment() -> Result<i32, ToolError> {
     // TODO: get a global counter from some context
-    // let counter = Counter::default();
     //counter.increment().await
+    todo!()
+}
+
+#[tool(
+    name = "decrement",
+    description = "Decrement the counter by 1",
+)]
+async fn decrement() -> Result<i32, ToolError> {
+    // TODO: get a global counter from some context
+    todo!()
+}
+
+#[tool(
+    name = "get_value",
+    description = "Get the current value of the counter",
+)]
+async fn get_value() -> Result<i32, ToolError> {
+    // TODO: get a global counter from some context
     todo!()
 }
 
@@ -69,8 +83,13 @@ async fn main() -> Result<()> {
     let counter = Counter::default();
 
     // Create the server and add our tools
-    let mut mcp_server = MCPServer::default();
-    mcp_server.tools.insert("increment".to_string(), Arc::new(Increment));
+    let mut mcp_server = MCPServer::new(
+        "Counter".to_string(),
+        "This server provides a counter tool that can increment and decrement a counter. You can also get the current value of the counter.".to_string()
+    );
+    mcp_server.register_tool(Increment);
+    mcp_server.register_tool(Decrement);
+    mcp_server.register_tool(GetValue);
 
     // Create and run the server
     let router = RouterService(mcp_server);
