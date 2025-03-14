@@ -2,7 +2,7 @@ Examples using the `#[tool]` macro to define functions as tools, as opposed to t
 
 ## Stateless server
 
-Run with: `cargo run -p mcp-server-macros-examples --example stateless-server`
+Run with: `cargo run -p mcp-server-macros-examples --example calculator-server`
 
 Test by sending messages like:
 
