@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use mcp_core::ToolError;
 use mcp_macros::tool;
@@ -60,7 +58,7 @@ async fn main() -> Result<()> {
         "Calculator".to_string(),
         "This server provides a calculator tool that can perform basic arithmetic operations. Use the 'calculator' tool to perform calculations.".to_string()
     );
-    mcp_server.tools.insert("calculator".to_string(), Arc::new(Calculator));
+    mcp_server.register_tool(Calculator);
 
     // Create and run the server
     let router = RouterService(mcp_server);
