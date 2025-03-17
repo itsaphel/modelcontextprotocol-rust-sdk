@@ -38,7 +38,7 @@ impl Counter {
     name = "increment",
     description = "Increment the counter by 1",
 )]
-async fn increment() -> Result<i32, ToolError> {
+async fn increment() -> Result<i32, ToolError> { // counter: Data<Counter>
     // TODO: get a global counter from some context
     //counter.increment().await
     todo!()

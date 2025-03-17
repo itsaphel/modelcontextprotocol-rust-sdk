@@ -9,9 +9,10 @@ use pin_project::pin_project;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tower_service::Service;
 
+pub mod context;
+pub mod data;
 mod errors;
 pub use errors::{BoxError, RouterError, ServerError, TransportError};
-
 pub mod router;
 pub use router::Router;
 pub mod server;
@@ -125,9 +126,8 @@ pub struct Server<S> {
 
 impl<S> Server<S>
 where
-    S: Service<JsonRpcRequest, Response = JsonRpcResponse> + Send,
+    S: Service<JsonRpcRequest, Response = JsonRpcResponse>,
     S::Error: Into<BoxError>,
-    S::Future: Send,
 {
     pub fn new(service: S) -> Self {
         Self { service }

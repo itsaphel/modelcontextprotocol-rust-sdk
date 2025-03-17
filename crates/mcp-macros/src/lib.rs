@@ -66,6 +66,20 @@ impl Parse for MacroArgs {
     }
 }
 
+fn is_injected_type(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(ty) => {
+            let path = &ty.path;
+            if let Some(segment) = path.segments.last() {
+                segment.ident == "Inject"
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
 #[proc_macro_attribute]
 pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as MacroArgs);
@@ -83,12 +97,18 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
     let tool_description = args.description.unwrap_or_default();
 
     // Extract parameter names, types, and descriptions
+    let mut ctx_params = Vec::new();
     let mut param_defs = Vec::new();
     let mut param_names = Vec::new();
 
     for arg in input_fn.sig.inputs.iter() {
         if let FnArg::Typed(PatType { pat, ty, .. }) = arg {
             if let Pat::Ident(param_ident) = &**pat {
+                if is_injected_type(&**ty) {
+                    ctx_params.push(param_ident);
+                    continue;
+                }
+                
                 let param_name = &param_ident.ident;
                 let param_name_str = param_name.to_string();
                 let description = args
@@ -108,6 +128,9 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Generate the implementation
     let params_struct_name = format_ident!("{}Parameters", struct_name);
+    let ctx_params = (0..ctx_params.len()).map(|_| quote! { 
+        <mcp_server::data::Inject<_> as mcp_server::context::FromContext>::from_context(&context), 
+    });
     let expanded = quote! {
         #[derive(serde::Deserialize, schemars::JsonSchema)]
         struct #params_struct_name {
@@ -119,8 +142,8 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
         #[derive(Default)]
         struct #struct_name;
 
-        #[async_trait::async_trait]
-        impl mcp_core::handler::ToolHandler for #struct_name {
+        #[async_trait::async_trait(?Send)]
+        impl mcp_server::server::CtxToolHandler for #struct_name {
             fn name(&self) -> &'static str {
                 #tool_name
             }
@@ -134,12 +157,12 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
                     .expect("Failed to generate schema")
             }
 
-            async fn call(&self, params: serde_json::Value) -> Result<serde_json::Value, mcp_core::handler::ToolError> {
+            async fn call(&self, context: &mcp_server::context::Context, params: serde_json::Value) -> Result<serde_json::Value, mcp_core::handler::ToolError> {
                 let params: #params_struct_name = serde_json::from_value(params)
                     .map_err(|e| mcp_core::handler::ToolError::InvalidParameters(e.to_string()))?;
 
                 // Extract parameters and call the function
-                let result = #fn_name(#(params.#param_names,)*).await
+                let result = #fn_name(#(#ctx_params)* #(params.#param_names,)*).await
                     .map_err(|e| mcp_core::handler::ToolError::ExecutionError(e.to_string()))?;
 
                 Ok(serde_json::to_value(result).expect("should serialize"))
