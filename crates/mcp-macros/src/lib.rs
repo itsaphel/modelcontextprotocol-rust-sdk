@@ -129,7 +129,7 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
     // Generate the implementation
     let params_struct_name = format_ident!("{}Parameters", struct_name);
     let ctx_params = (0..ctx_params.len()).map(|_| quote! { 
-        <mcp_server::data::Inject<_> as mcp_server::context::FromContext>::from_context(&context), 
+        <mcp_server::context::Inject<_> as mcp_server::context::FromContext>::from_context(&context), 
     });
     let expanded = quote! {
         #[derive(serde::Deserialize, schemars::JsonSchema)]

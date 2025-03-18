@@ -1,8 +1,8 @@
 use anyhow::Result;
 use mcp_core::ToolError;
 use mcp_macros::tool;
+use mcp_server::context::Inject;
 use mcp_server::{
-    data::Inject,
     router::RouterService,
     server::MCPServerBuilder,
     ByteTransport, Server,
@@ -17,16 +17,14 @@ pub struct Counter {
 }
 
 impl Counter {
-    fn increment(&self, quantity: u32) -> i32 {
+    fn increment(&self, quantity: u32) {
         let mut counter = self.counter.lock().unwrap();
         *counter += quantity as i32;
-        *counter
     }
     
-    fn decrement(&self, quantity: u32) -> i32 {
+    fn decrement(&self, quantity: u32) {
         let mut counter = self.counter.lock().unwrap();
         *counter -= quantity as i32;
-        *counter
     }
 
     fn get_value(&self) -> i32 {
@@ -65,10 +63,13 @@ async fn get_value(counter: Inject<Counter>) -> Result<i32, ToolError> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let counter = Counter::default();
+
+    // TODO: [1]
     let mcp_server = MCPServerBuilder::new(
         "Counter".to_string(),
         "This server provides a counter tool that can increment and decrement a counter. You can also get the current value of the counter.".to_string()
     )
+    // TODO: [3]
     .with_tool(Increment)
     .with_tool(Decrement)
     .with_tool(GetValue)
@@ -82,3 +83,16 @@ async fn main() -> Result<()> {
     tracing::info!("Server initialized and ready to handle requests");
     Ok(server.run(transport).await?)
 }
+
+/*
+ * Remaining questions:
+ * 1: Is compile-time safety possible? i.e. check that all injections within registered tools
+        are present in the server's context.
+   2: What to call "Inject" - sounds Java-y. Maybe State, Context, Ctx, etc.
+   3: tools are "magic structs" (`Increment` not actually in source code)
+   4: At what level should tool handlers be defined? (currently they must be pure functions, but
+        could alternatively be methods on a struct)
+   5: things are currently !Send & !Sync. maybe doesn't play well with Tokio's executor. Do we care?
+   6: Naming: what to call the structs that are injected. Can't reuse words like 'tools';
+      & not necessarily 'state'
+ */

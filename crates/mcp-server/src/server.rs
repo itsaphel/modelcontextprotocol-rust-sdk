@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
-
+use crate::context::Inject;
 use crate::{context::Context, router::CapabilitiesBuilder, Router};
 use async_trait::async_trait;
 use mcp_core::{
@@ -13,6 +7,12 @@ use mcp_core::{
     Content, Tool, ToolError, ToolResult,
 };
 use serde_json::Value;
+use std::rc::Rc;
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+};
 
 #[async_trait(?Send)]
 pub trait CtxToolHandler: 'static {
@@ -29,21 +29,23 @@ pub trait CtxToolHandler: 'static {
     async fn call(&self, context: &Context, params: Value) -> ToolResult<Value>;
 }
 
-type Tools = HashMap<String, Arc<dyn CtxToolHandler>>;
+type Tools = HashMap<String, Rc<dyn CtxToolHandler>>;
 
 /// A higher-level server that handles MCP requests.
 #[derive(Clone)]
 pub struct MCPServer {
     name: String,
     description: String,
-    tools: Arc<Tools>,
-    ctx: Arc<Context>,
+    tools: Rc<Tools>,
+    ctx: Rc<Context>,
 }
 
+/// Build an MCPServer. Tools and structs are defined when the MCPServer is built. They cannot be
+/// modified after that time.
 pub struct MCPServerBuilder {
     name: String,
     description: String,
-    tools: HashMap<String, Arc<dyn CtxToolHandler>>,
+    tools: HashMap<String, Rc<dyn CtxToolHandler>>,
     ctx: Context,
 }
 
@@ -58,11 +60,11 @@ impl MCPServerBuilder {
     }
 
     pub fn with_tool(mut self, tool: impl CtxToolHandler) -> Self {
-        self.tools.insert(tool.name().to_string(), Arc::new(tool));
+        self.tools.insert(tool.name().to_string(), Rc::new(tool));
         self
     }
 
-    pub fn with_state<T: 'static>(mut self, state: T) -> Self {
+    pub fn with_state<T: 'static>(mut self, state: Inject<T>) -> Self {
         self.ctx.insert(state);
         self
     }
@@ -71,8 +73,8 @@ impl MCPServerBuilder {
         MCPServer {
             name: self.name,
             description: self.description,
-            tools: Arc::new(self.tools),
-            ctx: Arc::new(self.ctx),
+            tools: Rc::new(self.tools),
+            ctx: Rc::new(self.ctx),
         }
     }
 }

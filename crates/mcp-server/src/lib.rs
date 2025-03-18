@@ -10,7 +10,6 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use tower_service::Service;
 
 pub mod context;
-pub mod data;
 mod errors;
 pub use errors::{BoxError, RouterError, ServerError, TransportError};
 pub mod router;
