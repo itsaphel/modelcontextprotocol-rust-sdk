@@ -2,11 +2,11 @@ use anyhow::Result;
 use mcp_core::ToolError;
 use mcp_macros::tool;
 use mcp_server::router::RouterService;
-use mcp_server::{ByteTransport, Server, MCPServer};
+use mcp_server::server::MCPServerBuilder;
+use mcp_server::{ByteTransport, Server};
 use tokio::io::{stdin, stdout};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{self, EnvFilter};
-
 
 #[tool(
     name = "calculator",
@@ -54,11 +54,10 @@ async fn main() -> Result<()> {
     tracing::info!("Starting MCP server");
 
     // Create the server and add our tools
-    let mut mcp_server = MCPServer::new(
+    let mcp_server = MCPServerBuilder::new(
         "Calculator".to_string(),
         "This server provides a calculator tool that can perform basic arithmetic operations. Use the 'calculator' tool to perform calculations.".to_string()
-    );
-    mcp_server.register_tool(Calculator);
+    ).with_tool(Calculator).build();
 
     // Create and run the server
     let router = RouterService(mcp_server);
