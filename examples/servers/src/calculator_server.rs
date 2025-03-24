@@ -9,7 +9,6 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{self, EnvFilter};
 
 #[tool(
-    name = "calculator",
     description = "Perform basic arithmetic operations",
     params(
         x = "First number in the calculation",

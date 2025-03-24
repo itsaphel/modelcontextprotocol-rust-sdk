@@ -6,9 +6,9 @@ use std::{
     sync::Arc,
 };
 
-/// Store of structs that may be injected in MCPServer tool handlers.
+/// Registry of types that may be injected in MCPServer tool handlers.
 /// 
-/// Registration must happen when the MCPServer is built. Afterwards, this HashMap cannot be modified.
+/// Types must be registered when the MCPServer is built. Afterwards, this HashMap cannot be modified.
 #[derive(Default)]
 pub struct Context {
     /// A map from type to the injected tool.
@@ -16,12 +16,12 @@ pub struct Context {
 }
 
 impl Context {
-    /// Register a struct of type T in the context.
+    /// Register a type T in the server's context.
     pub fn insert<T: 'static>(&mut self, state: Inject<T>) {
         self.map.insert(TypeId::of::<Inject<T>>(), Box::new(state));
     }
 
-    /// Get a reference to a struct of type T from the context.
+    /// Get a reference to a type T from the context.
     pub fn get<T: 'static>(&self) -> Option<&T> {
         self.map
             .get(&TypeId::of::<T>())
@@ -31,15 +31,15 @@ impl Context {
 
 /// A trait to go from a Context to a type T.
 ///
-/// Implementing this for a struct allows that struct to be injected into tool
+/// Implementing this for a type allows it to be directly injected into tool
 /// handlers as a parameter.
 pub trait FromContext {
     fn from_context(ctx: &Context) -> Self;
 }
 
-/// Inject wraps structs that can be injected into tool handler functions. These allow tool handlers
+/// Inject wraps types that can be injected into tool handler functions. These allow tool handlers
 /// to have side effects and access shared state, outside of the handler's parameters.
-/// The struct must be registered in the MCPServer's context to be injected.
+/// The type must be registered in the MCPServer's context to be injected.
 /// 
 /// # Examples
 /// 
@@ -109,7 +109,7 @@ where
     }
 }
 
-/// Implement ability to get a Data<T> from the context
+/// Implement ability to get a Inject<T> from the server's context
 impl<T: 'static> FromContext for Inject<T> {
     fn from_context(ctx: &Context) -> Self {
         if let Some(obj) = ctx.get::<Inject<T>>() {
