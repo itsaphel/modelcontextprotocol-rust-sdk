@@ -5,6 +5,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send>;
+
 /// A generic error type for transport operations.
 #[derive(Debug, Error)]
 pub enum Error {
