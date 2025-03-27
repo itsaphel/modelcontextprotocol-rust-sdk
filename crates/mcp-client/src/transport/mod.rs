@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use mcp_core::{protocol::JsonRpcResponse, transport::SendableMessage};
+use mcp_core::{protocol::JsonRpcResponse, protocol::MessageId, transport::SendableMessage};
 use std::collections::HashMap;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -98,7 +98,7 @@ pub async fn send_message(
 
 // A data structure to store pending requests and their response channels
 pub struct PendingRequests {
-    requests: RwLock<HashMap<String, oneshot::Sender<Result<JsonRpcResponse, Error>>>>,
+    requests: RwLock<HashMap<MessageId, oneshot::Sender<Result<JsonRpcResponse, Error>>>>,
 }
 
 impl Default for PendingRequests {
@@ -116,13 +116,13 @@ impl PendingRequests {
 
     pub async fn insert(
         &self,
-        id: String,
+        id: MessageId,
         sender: oneshot::Sender<Result<JsonRpcResponse, Error>>,
     ) {
         self.requests.write().await.insert(id, sender);
     }
 
-    pub async fn respond(&self, id: &str, response: Result<JsonRpcResponse, Error>) {
+    pub async fn respond(&self, id: &MessageId, response: Result<JsonRpcResponse, Error>) {
         if let Some(tx) = self.requests.write().await.remove(id) {
             let _ = tx.send(response);
         }

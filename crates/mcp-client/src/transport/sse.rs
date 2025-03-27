@@ -115,9 +115,7 @@ impl SseActor {
                             JsonRpcResponse::Success { id, .. } => id.clone(),
                             JsonRpcResponse::Error { id, .. } => id.clone(),
                         };
-                        pending_requests
-                            .respond(&id.to_string(), Ok(response))
-                            .await;
+                        pending_requests.respond(&id, Ok(response)).await;
                     } else {
                         warn!("Failed to parse SSE message: {:?}", e);
                     }
@@ -166,7 +164,7 @@ impl SseActor {
             if let Some(response_tx) = transport_msg.response_tx {
                 if let SendableMessage::Request(request) = &transport_msg.message {
                     pending_requests
-                        .insert(request.id.to_string(), response_tx)
+                        .insert(request.id.clone(), response_tx)
                         .await;
                 }
             }

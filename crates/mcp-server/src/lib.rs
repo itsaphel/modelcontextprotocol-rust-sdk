@@ -170,13 +170,13 @@ where
             let _enter = _span.enter();
             match msg_result {
                 Ok(SendableMessage::Request(request)) => {
-                    let id = request.id;
+                    let id = request.id.clone();
                     // TODO: Remove after testing
                     trace_log_request(&request);
 
                     // Process the request using our service. Respond with the response from
                     // the service, or an error response if the call fails.
-                    let response = match service.call(SendableMessage::Request(request)).await {
+                    let response = match service.call(SendableMessage::from(request)).await {
                         Ok(resp) => resp,
                         Err(e) => {
                             let error_msg = e.into().to_string();

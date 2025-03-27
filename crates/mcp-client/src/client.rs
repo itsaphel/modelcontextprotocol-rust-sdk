@@ -2,7 +2,7 @@ use mcp_core::{
     protocol::{
         CallToolResult, GetPromptResult, Implementation, InitializeResult, JsonRpcNotification,
         JsonRpcRequest, JsonRpcResponse, ListPromptsResult, ListResourcesResult, ListToolsResult,
-        ReadResourceResult, ServerCapabilities, METHOD_NOT_FOUND,
+        MessageId, ReadResourceResult, ServerCapabilities, METHOD_NOT_FOUND,
     },
     transport::SendableMessage,
 };
@@ -140,7 +140,7 @@ where
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let request = SendableMessage::from(JsonRpcRequest::new(
-            id,
+            MessageId::Num(id),
             method.to_string(),
             Some(params.clone()),
         ));

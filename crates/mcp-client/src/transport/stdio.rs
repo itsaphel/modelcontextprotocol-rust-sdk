@@ -102,9 +102,7 @@ impl StdioActor {
                             JsonRpcResponse::Success { id, .. } => id.clone(),
                             JsonRpcResponse::Error { id, .. } => id.clone(),
                         };
-                        pending_requests
-                            .respond(&id.to_string(), Ok(response))
-                            .await;
+                        pending_requests.respond(&id, Ok(response)).await;
                     } else {
                         // TODO: remove after testing, or move to trace level
                         tracing::error!(message = ?line, "Received invalid message");
@@ -145,7 +143,7 @@ impl StdioActor {
             if let Some(response_tx) = transport_msg.response_tx.take() {
                 if let SendableMessage::Request(request) = &transport_msg.message {
                     pending_requests
-                        .insert(request.id.to_string(), response_tx)
+                        .insert(request.id.clone(), response_tx)
                         .await;
                 }
             }

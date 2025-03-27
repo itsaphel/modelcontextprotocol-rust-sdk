@@ -9,18 +9,25 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Message ID, which according to the MCP spec must be either a number or a string.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[serde(untagged)]
+pub enum MessageId {
+    Num(u64),
+    Str(String),
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JsonRpcRequest {
     jsonrpc: String,
-    // TODO: `id` may be a String too
-    pub id: u64,
+    pub id: MessageId,
     pub method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
 impl JsonRpcRequest {
-    pub fn new(id: u64, method: String, params: Option<Value>) -> Self {
+    pub fn new(id: MessageId, method: String, params: Option<Value>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
             id,
@@ -53,18 +60,18 @@ impl JsonRpcNotification {
 pub enum JsonRpcResponse {
     Success {
         jsonrpc: String,
-        id: u64,
+        id: MessageId,
         result: Value,
     },
     Error {
         jsonrpc: String,
-        id: u64,
+        id: MessageId,
         error: ErrorData,
     },
 }
 
 impl JsonRpcResponse {
-    pub fn success(id: u64, result: Value) -> Self {
+    pub fn success(id: MessageId, result: Value) -> Self {
         Self::Success {
             jsonrpc: "2.0".to_string(),
             id,
@@ -72,7 +79,7 @@ impl JsonRpcResponse {
         }
     }
 
-    pub fn error(id: u64, error: ErrorData) -> Self {
+    pub fn error(id: MessageId, error: ErrorData) -> Self {
         Self::Error {
             jsonrpc: "2.0".to_string(),
             id,
