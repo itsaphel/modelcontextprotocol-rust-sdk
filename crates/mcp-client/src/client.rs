@@ -1,7 +1,10 @@
-use mcp_core::protocol::{
-    CallToolResult, GetPromptResult, Implementation, InitializeResult, JsonRpcError,
-    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, ListPromptsResult,
-    ListResourcesResult, ListToolsResult, ReadResourceResult, ServerCapabilities, METHOD_NOT_FOUND,
+use mcp_core::{
+    protocol::{
+        CallToolResult, GetPromptResult, Implementation, InitializeResult, JsonRpcNotification,
+        JsonRpcRequest, JsonRpcResponse, ListPromptsResult, ListResourcesResult, ListToolsResult,
+        ReadResourceResult, ServerCapabilities, METHOD_NOT_FOUND,
+    },
+    transport::SendableMessage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -102,7 +105,7 @@ pub trait McpClientTrait: Send + Sync {
 /// The MCP client is the interface for MCP operations.
 pub struct McpClient<S>
 where
-    S: Service<JsonRpcMessage, Response = JsonRpcMessage> + Clone + Send + Sync + 'static,
+    S: Service<SendableMessage, Response = Option<JsonRpcResponse>> + Clone + Send + Sync + 'static,
     S::Error: Into<Error>,
     S::Future: Send,
 {
@@ -114,7 +117,7 @@ where
 
 impl<S> McpClient<S>
 where
-    S: Service<JsonRpcMessage, Response = JsonRpcMessage> + Clone + Send + Sync + 'static,
+    S: Service<SendableMessage, Response = Option<JsonRpcResponse>> + Clone + Send + Sync + 'static,
     S::Error: Into<Error>,
     S::Future: Send,
 {
@@ -127,7 +130,7 @@ where
         }
     }
 
-    /// Send a JSON-RPC request and check we don't get an error response.
+    /// Send a JSON-RPC request
     async fn send_request<R>(&self, method: &str, params: Value) -> Result<R, Error>
     where
         R: for<'de> Deserialize<'de>,
@@ -136,12 +139,11 @@ where
         service.ready().await.map_err(|_| Error::NotReady)?;
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let request = JsonRpcMessage::Request(JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: Some(id),
-            method: method.to_string(),
-            params: Some(params.clone()),
-        });
+        let request = SendableMessage::from(JsonRpcRequest::new(
+            id,
+            method.to_string(),
+            Some(params.clone()),
+        ));
 
         let response_msg = service
             .call(request)
@@ -153,48 +155,24 @@ where
                     .map(|s| s.name.clone())
                     .unwrap_or("".to_string()),
                 method: method.to_string(),
-                // we don't need include params because it can be really large
                 source: Box::new(e.into()),
             })?;
 
-        match response_msg {
-            JsonRpcMessage::Response(JsonRpcResponse {
-                id, result, error, ..
-            }) => {
-                // Verify id matches
-                if id != Some(self.next_id.load(Ordering::SeqCst) - 1) {
-                    return Err(Error::UnexpectedResponse(
-                        "id mismatch for JsonRpcResponse".to_string(),
-                    ));
-                }
-                if let Some(err) = error {
-                    Err(Error::RpcError {
-                        code: err.code,
-                        message: err.message,
-                    })
-                } else if let Some(r) = result {
-                    Ok(serde_json::from_value(r)?)
-                } else {
-                    Err(Error::UnexpectedResponse("missing result".to_string()))
-                }
+        if response_msg.is_none() {
+            return Err(Error::UnexpectedResponse(
+                "No response from server".to_string(),
+            ));
+        }
+        let response = response_msg.unwrap();
+
+        match response {
+            JsonRpcResponse::Success { result, .. } => {
+                Ok(serde_json::from_value(result).map_err(|e| Error::Serialization(e))?)
             }
-            JsonRpcMessage::Error(JsonRpcError { id, error, .. }) => {
-                if id != Some(self.next_id.load(Ordering::SeqCst) - 1) {
-                    return Err(Error::UnexpectedResponse(
-                        "id mismatch for JsonRpcError".to_string(),
-                    ));
-                }
-                Err(Error::RpcError {
-                    code: error.code,
-                    message: error.message,
-                })
-            }
-            _ => {
-                // Requests/notifications not expected as a response
-                Err(Error::UnexpectedResponse(
-                    "unexpected message type".to_string(),
-                ))
-            }
+            JsonRpcResponse::Error { error, .. } => Err(Error::RpcError {
+                code: error.code,
+                message: error.message,
+            }),
         }
     }
 
@@ -203,11 +181,10 @@ where
         let mut service = self.service.lock().await;
         service.ready().await.map_err(|_| Error::NotReady)?;
 
-        let notification = JsonRpcMessage::Notification(JsonRpcNotification {
-            jsonrpc: "2.0".to_string(),
-            method: method.to_string(),
-            params: Some(params.clone()),
-        });
+        let notification = SendableMessage::from(JsonRpcNotification::new(
+            method.to_string(),
+            Some(params.clone()),
+        ));
 
         service
             .call(notification)
@@ -219,7 +196,6 @@ where
                     .map(|s| s.name.clone())
                     .unwrap_or("".to_string()),
                 method: method.to_string(),
-                // we don't need include params because it can be really large
                 source: Box::new(e.into()),
             })?;
 
@@ -235,7 +211,7 @@ where
 #[async_trait::async_trait]
 impl<S> McpClientTrait for McpClient<S>
 where
-    S: Service<JsonRpcMessage, Response = JsonRpcMessage> + Clone + Send + Sync + 'static,
+    S: Service<SendableMessage, Response = Option<JsonRpcResponse>> + Clone + Send + Sync + 'static,
     S::Error: Into<Error>,
     S::Future: Send,
 {

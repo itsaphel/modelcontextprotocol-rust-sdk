@@ -2,11 +2,12 @@ use anyhow::Result;
 use mcp_core::ToolError;
 use mcp_macros::tool;
 use mcp_server::{
-    context::Inject, router::RouterService, server::MCPServerBuilder, ByteTransport, Server,
+    ByteTransport, Server, context::Inject, router::RouterService, server::MCPServerBuilder,
 };
 use serde::Deserialize;
 use std::sync::Mutex;
 use tokio::io::{stdin, stdout};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Default, Deserialize)]
 pub struct Counter {
@@ -53,10 +54,17 @@ async fn get_value(counter: Inject<Counter>) -> Result<i32, ToolError> {
     Ok(counter.get_value())
 }
 
-// TODO: Compare above to struct-style
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    // Initialize the tracing subscriber with file and stdout logging
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_file(true)
+        .with_line_number(true)
+        .init();
+
     let counter = Counter::default();
 
     let mcp_server = MCPServerBuilder::new(

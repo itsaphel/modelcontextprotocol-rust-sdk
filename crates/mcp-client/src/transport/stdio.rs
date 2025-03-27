@@ -1,9 +1,10 @@
+use mcp_core::protocol::JsonRpcResponse;
+use mcp_core::transport::SendableMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 
 use async_trait::async_trait;
-use mcp_core::protocol::JsonRpcMessage;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, Mutex};
 
@@ -12,6 +13,11 @@ use super::{send_message, Error, PendingRequests, Transport, TransportHandle, Tr
 /// A `StdioTransport` uses a child process's stdin/stdout as a communication channel.
 ///
 /// It uses channels for message passing and handles responses asynchronously through a background task.
+///
+/// StdioActor needs to be given a `mpsc::Receiver<TransportMessage>` which will receive messages
+/// to be sent to the MCPServer. `pending_requests` is a store of message IDs for which we're waiting
+/// a response, and a corresponding channel to send the response on. There is a channel for errors
+/// to be communicated. Finally, there are handles to the child process's stdin, stdout, and stderr.
 pub struct StdioActor {
     receiver: mpsc::Receiver<TransportMessage>,
     pending_requests: Arc<PendingRequests>,
@@ -37,7 +43,8 @@ impl StdioActor {
         pin!(incoming);
         pin!(outgoing);
 
-        // Use select! to wait for either I/O completion or process exit
+        // Keep the process alive (the incoming and outgoing handlers). The select! will return only
+        // if one of the futures returns (due to an unrecoverable error) or the process exits.
         tokio::select! {
             result = &mut incoming => {
                 tracing::debug!("Stdin handler completed: {:?}", result);
@@ -67,10 +74,11 @@ impl StdioActor {
                 .await;
         }
 
-        // Clean up regardless of which path we took
+        // Clean up
         self.pending_requests.clear().await;
     }
 
+    // Receive messages from the MCP server
     async fn handle_incoming_messages(stdout: ChildStdout, pending_requests: Arc<PendingRequests>) {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
@@ -81,25 +89,25 @@ impl StdioActor {
                     break;
                 } // EOF
                 Ok(_) => {
-                    if let Ok(message) = serde_json::from_str::<JsonRpcMessage>(&line) {
+                    // TODO: Support notifications
+                    // We take a more opinionated approach, only supporting server responding to
+                    // requests, and not server-initiated requests (as the protocol technically allows).
+                    if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&line) {
                         tracing::debug!(
-                            message = ?message,
+                            message = ?response,
                             "Received incoming message"
                         );
 
-                        match &message {
-                            JsonRpcMessage::Response(response) => {
-                                if let Some(id) = &response.id {
-                                    pending_requests.respond(&id.to_string(), Ok(message)).await;
-                                }
-                            }
-                            JsonRpcMessage::Error(error) => {
-                                if let Some(id) = &error.id {
-                                    pending_requests.respond(&id.to_string(), Ok(message)).await;
-                                }
-                            }
-                            _ => {} // TODO: Handle other variants (Request, etc.)
-                        }
+                        let id = match &response {
+                            JsonRpcResponse::Success { id, .. } => id.clone(),
+                            JsonRpcResponse::Error { id, .. } => id.clone(),
+                        };
+                        pending_requests
+                            .respond(&id.to_string(), Ok(response))
+                            .await;
+                    } else {
+                        // TODO: remove after testing, or move to trace level
+                        tracing::error!(message = ?line, "Received invalid message");
                     }
                     line.clear();
                 }
@@ -111,15 +119,19 @@ impl StdioActor {
         }
     }
 
+    // Send messages to the MCP server
     async fn handle_outgoing_messages(
         mut receiver: mpsc::Receiver<TransportMessage>,
         mut stdin: ChildStdin,
         pending_requests: Arc<PendingRequests>,
     ) {
+        // Receive submitted messages on the channel and transmit them to the MCP server over the
+        // child process's stdin.
         while let Some(mut transport_msg) = receiver.recv().await {
             let message_str = match serde_json::to_string(&transport_msg.message) {
                 Ok(s) => s,
                 Err(e) => {
+                    // If we can't serialize the message, send an error response on the response channel.
                     if let Some(tx) = transport_msg.response_tx.take() {
                         let _ = tx.send(Err(Error::Serialization(e)));
                     }
@@ -129,11 +141,12 @@ impl StdioActor {
 
             tracing::debug!(message = ?transport_msg.message, "Sending outgoing message");
 
+            // If the message requires a response, insert it into the pending requests map.
             if let Some(response_tx) = transport_msg.response_tx.take() {
-                if let JsonRpcMessage::Request(request) = &transport_msg.message {
-                    if let Some(id) = &request.id {
-                        pending_requests.insert(id.to_string(), response_tx).await;
-                    }
+                if let SendableMessage::Request(request) = &transport_msg.message {
+                    pending_requests
+                        .insert(request.id.to_string(), response_tx)
+                        .await;
                 }
             }
 
@@ -142,13 +155,11 @@ impl StdioActor {
                 .await
             {
                 tracing::error!(error = ?e, "Error writing message to child process");
-                pending_requests.clear().await;
                 break;
             }
 
             if let Err(e) = stdin.flush().await {
                 tracing::error!(error = ?e, "Error flushing message to child process");
-                pending_requests.clear().await;
                 break;
             }
         }
@@ -163,7 +174,7 @@ pub struct StdioTransportHandle {
 
 #[async_trait::async_trait]
 impl TransportHandle for StdioTransportHandle {
-    async fn send(&self, message: JsonRpcMessage) -> Result<JsonRpcMessage, Error> {
+    async fn send(&self, message: SendableMessage) -> Result<Option<JsonRpcResponse>, Error> {
         let result = send_message(&self.sender, message).await;
         // Check for any pending errors even if send is successful
         self.check_for_errors().await?;
@@ -191,6 +202,8 @@ pub struct StdioTransport {
 }
 
 impl StdioTransport {
+    /// Create a new `StdioTransport`. The command and args are passed directly to `Command::new`,
+    /// and used to spawn a new process which runs an MCP server.
     pub fn new<S: Into<String>>(
         command: S,
         args: Vec<String>,
@@ -203,6 +216,15 @@ impl StdioTransport {
         }
     }
 
+    /// Spawn the MCP server as a new process. This method returns handles to communciate with the
+    /// MCP server. Namely, the child process, stdin, stdout, and stderr. As MCP servers can be
+    /// communicated with using stdin/stdout (see [stdio in the spec]), these handles are used for
+    /// communication when using stdio as the transport.
+    ///
+    /// As an end user building a client, you probably want to use the `Transport` trait to
+    /// communicate, which abstracts over stdio details.
+    ///
+    /// [stdio in the spec]: https://spec.modelcontextprotocol.io/specification/2024-11-05/basic/transports/#stdio
     async fn spawn_process(&self) -> Result<(Child, ChildStdin, ChildStdout, ChildStderr), Error> {
         let mut command = Command::new(&self.command);
         command
@@ -248,6 +270,8 @@ impl StdioTransport {
 impl Transport for StdioTransport {
     type Handle = StdioTransportHandle;
 
+    /// Spawn the MCP server as a new process. This method returns a handle which can be used to
+    /// send messages to the MCP server.
     async fn start(&self) -> Result<Self::Handle, Error> {
         let (process, stdin, stdout, stderr) = self.spawn_process().await?;
         let (message_tx, message_rx) = mpsc::channel(32);

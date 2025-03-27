@@ -8,11 +8,7 @@ use mcp_core::{
 };
 use serde_json::Value;
 use std::rc::Rc;
-use std::{
-    collections::HashMap,
-    future::Future,
-    pin::Pin,
-};
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 #[async_trait(?Send)]
 pub trait CtxToolHandler: 'static {

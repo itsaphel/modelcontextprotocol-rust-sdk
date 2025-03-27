@@ -7,7 +7,7 @@ use std::{
 };
 
 /// Registry of types that may be injected in MCPServer tool handlers.
-/// 
+///
 /// Types must be registered when the MCPServer is built. Afterwards, this HashMap cannot be modified.
 #[derive(Default)]
 pub struct Context {
@@ -40,15 +40,15 @@ pub trait FromContext {
 /// Inject wraps types that can be injected into tool handler functions. These allow tool handlers
 /// to have side effects and access shared state, outside of the handler's parameters.
 /// The type must be registered in the MCPServer's context to be injected.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// # use mcp_server::context::Inject;
 /// # use mcp_macros::tool;
 /// # use mcp_core::ToolError;
 /// struct MyState { counter: i32 }
-/// 
+///
 /// #[tool]
 /// async fn my_tool(my_state: Inject<MyState>) -> Result<(), ToolError> {
 ///    // MyState is injected from the MCPServer's context

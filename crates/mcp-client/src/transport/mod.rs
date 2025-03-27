@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use mcp_core::protocol::JsonRpcMessage;
+use mcp_core::{protocol::JsonRpcResponse, transport::SendableMessage};
 use std::collections::HashMap;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -7,6 +7,7 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 pub type BoxError = Box<dyn std::error::Error + Sync + Send>;
 
 /// A generic error type for transport operations.
+// TODO: Rename to TransportError, to make it clear from logical errors.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("I/O error: {0}")]
@@ -38,12 +39,15 @@ pub enum Error {
 #[derive(Debug)]
 pub struct TransportMessage {
     /// The JSON-RPC message to send
-    pub message: JsonRpcMessage,
+    pub message: SendableMessage,
     /// Channel to receive the response on (None for notifications)
-    pub response_tx: Option<oneshot::Sender<Result<JsonRpcMessage, Error>>>,
+    pub response_tx: Option<oneshot::Sender<Result<JsonRpcResponse, Error>>>,
 }
 
-/// A generic asynchronous transport trait with channel-based communication
+/// A generic asynchronous transport trait, used to abstract over the underlying transport mechanism.
+///
+/// The transport can be started and closed. Starting the transport returns a handle, which can be
+/// used to send messages over the transport.
 #[async_trait]
 pub trait Transport {
     type Handle: TransportHandle;
@@ -58,39 +62,43 @@ pub trait Transport {
 
 #[async_trait]
 pub trait TransportHandle: Send + Sync + Clone + 'static {
-    async fn send(&self, message: JsonRpcMessage) -> Result<JsonRpcMessage, Error>;
+    /// Send a message over the transport.
+    ///
+    /// The SendableMessage may be either a JSON-RPC request or a notification.
+    /// For requests, a `JsonRpcResponse` (or error) is returned. For notifications, there is no
+    /// response if the request is successful.
+    async fn send(&self, message: SendableMessage) -> Result<Option<JsonRpcResponse>, Error>;
 }
 
 // Helper function that contains the common send implementation
 pub async fn send_message(
     sender: &mpsc::Sender<TransportMessage>,
-    message: JsonRpcMessage,
-) -> Result<JsonRpcMessage, Error> {
+    message: SendableMessage,
+) -> Result<Option<JsonRpcResponse>, Error> {
     match message {
-        JsonRpcMessage::Request(request) => {
+        SendableMessage::Request(_) => {
             let (respond_to, response) = oneshot::channel();
             let msg = TransportMessage {
-                message: JsonRpcMessage::Request(request),
+                message,
                 response_tx: Some(respond_to),
             };
             sender.send(msg).await.map_err(|_| Error::ChannelClosed)?;
-            Ok(response.await.map_err(|_| Error::ChannelClosed)??)
+            Ok(Some(response.await.map_err(|_| Error::ChannelClosed)??))
         }
-        JsonRpcMessage::Notification(notification) => {
+        SendableMessage::Notification(_) => {
             let msg = TransportMessage {
-                message: JsonRpcMessage::Notification(notification),
+                message,
                 response_tx: None,
             };
             sender.send(msg).await.map_err(|_| Error::ChannelClosed)?;
-            Ok(JsonRpcMessage::Nil)
+            Ok(None)
         }
-        _ => Err(Error::UnsupportedMessage),
     }
 }
 
 // A data structure to store pending requests and their response channels
 pub struct PendingRequests {
-    requests: RwLock<HashMap<String, oneshot::Sender<Result<JsonRpcMessage, Error>>>>,
+    requests: RwLock<HashMap<String, oneshot::Sender<Result<JsonRpcResponse, Error>>>>,
 }
 
 impl Default for PendingRequests {
@@ -106,11 +114,15 @@ impl PendingRequests {
         }
     }
 
-    pub async fn insert(&self, id: String, sender: oneshot::Sender<Result<JsonRpcMessage, Error>>) {
+    pub async fn insert(
+        &self,
+        id: String,
+        sender: oneshot::Sender<Result<JsonRpcResponse, Error>>,
+    ) {
         self.requests.write().await.insert(id, sender);
     }
 
-    pub async fn respond(&self, id: &str, response: Result<JsonRpcMessage, Error>) {
+    pub async fn respond(&self, id: &str, response: Result<JsonRpcResponse, Error>) {
         if let Some(tx) = self.requests.write().await.remove(id) {
             let _ = tx.send(response);
         }

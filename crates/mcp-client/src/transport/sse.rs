@@ -2,7 +2,8 @@ use crate::transport::{Error, PendingRequests, TransportMessage};
 use async_trait::async_trait;
 use eventsource_client::{Client, SSE};
 use futures::TryStreamExt;
-use mcp_core::protocol::{JsonRpcMessage, JsonRpcRequest};
+use mcp_core::protocol::JsonRpcResponse;
+use mcp_core::transport::SendableMessage;
 use reqwest::Client as HttpClient;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,30 +109,17 @@ impl SseActor {
         while let Ok(Some(event)) = stream.try_next().await {
             match event {
                 SSE::Event(e) if e.event_type == "message" => {
-                    // Attempt to parse the SSE data as a JsonRpcMessage
-                    match serde_json::from_str::<JsonRpcMessage>(&e.data) {
-                        Ok(message) => {
-                            match &message {
-                                JsonRpcMessage::Response(response) => {
-                                    if let Some(id) = &response.id {
-                                        pending_requests
-                                            .respond(&id.to_string(), Ok(message))
-                                            .await;
-                                    }
-                                }
-                                JsonRpcMessage::Error(error) => {
-                                    if let Some(id) = &error.id {
-                                        pending_requests
-                                            .respond(&id.to_string(), Ok(message))
-                                            .await;
-                                    }
-                                }
-                                _ => {} // TODO: Handle other variants (Request, etc.)
-                            }
-                        }
-                        Err(err) => {
-                            warn!("Failed to parse SSE message: {err}");
-                        }
+                    // Attempt to parse the SSE data as a JsonRpcResponse
+                    if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&e.data) {
+                        let id = match &response {
+                            JsonRpcResponse::Success { id, .. } => id.clone(),
+                            JsonRpcResponse::Error { id, .. } => id.clone(),
+                        };
+                        pending_requests
+                            .respond(&id.to_string(), Ok(response))
+                            .await;
+                    } else {
+                        warn!("Failed to parse SSE message: {:?}", e);
                     }
                 }
                 _ => { /* ignore other events */ }
@@ -176,10 +164,10 @@ impl SseActor {
 
             // If it's a request, store the channel so we can respond later
             if let Some(response_tx) = transport_msg.response_tx {
-                if let JsonRpcMessage::Request(JsonRpcRequest { id: Some(id), .. }) =
-                    &transport_msg.message
-                {
-                    pending_requests.insert(id.to_string(), response_tx).await;
+                if let SendableMessage::Request(request) = &transport_msg.message {
+                    pending_requests
+                        .insert(request.id.to_string(), response_tx)
+                        .await;
                 }
             }
 
@@ -222,7 +210,7 @@ pub struct SseTransportHandle {
 
 #[async_trait::async_trait]
 impl TransportHandle for SseTransportHandle {
-    async fn send(&self, message: JsonRpcMessage) -> Result<JsonRpcMessage, Error> {
+    async fn send(&self, message: SendableMessage) -> Result<Option<JsonRpcResponse>, Error> {
         send_message(&self.sender, message).await
     }
 }

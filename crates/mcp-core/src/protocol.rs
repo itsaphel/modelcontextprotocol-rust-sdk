@@ -11,117 +11,73 @@ use serde_json::Value;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JsonRpcRequest {
-    pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<u64>,
+    jsonrpc: String,
+    // TODO: `id` may be a String too
+    pub id: u64,
     pub method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct JsonRpcResponse {
-    pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<ErrorData>,
+impl JsonRpcRequest {
+    pub fn new(id: u64, method: String, params: Option<Value>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            method,
+            params,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JsonRpcNotification {
-    pub jsonrpc: String,
+    jsonrpc: String,
     pub method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct JsonRpcError {
-    pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<u64>,
-    pub error: ErrorData,
+impl JsonRpcNotification {
+    pub fn new(method: String, params: Option<Value>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            method,
+            params,
+        }
+    }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(untagged, try_from = "JsonRpcRaw")]
-pub enum JsonRpcMessage {
-    Request(JsonRpcRequest),
-    Response(JsonRpcResponse),
-    Notification(JsonRpcNotification),
-    Error(JsonRpcError),
-    Nil, // used to respond to notifications
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum JsonRpcResponse {
+    Success {
+        jsonrpc: String,
+        id: u64,
+        result: Value,
+    },
+    Error {
+        jsonrpc: String,
+        id: u64,
+        error: ErrorData,
+    },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcRaw {
-    jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    method: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    params: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<ErrorData>,
-}
-
-impl TryFrom<JsonRpcRaw> for JsonRpcMessage {
-    type Error = String;
-
-    fn try_from(raw: JsonRpcRaw) -> Result<Self, <Self as TryFrom<JsonRpcRaw>>::Error> {
-        // If it has an error field, it's an error response
-        if raw.error.is_some() {
-            return Ok(JsonRpcMessage::Error(JsonRpcError {
-                jsonrpc: raw.jsonrpc,
-                id: raw.id,
-                error: raw.error.unwrap(),
-            }));
+impl JsonRpcResponse {
+    pub fn success(id: u64, result: Value) -> Self {
+        Self::Success {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result,
         }
+    }
 
-        // If it has a result field, it's a response
-        if raw.result.is_some() {
-            return Ok(JsonRpcMessage::Response(JsonRpcResponse {
-                jsonrpc: raw.jsonrpc,
-                id: raw.id,
-                result: raw.result,
-                error: None,
-            }));
+    pub fn error(id: u64, error: ErrorData) -> Self {
+        Self::Error {
+            jsonrpc: "2.0".to_string(),
+            id,
+            error,
         }
-
-        // If we have a method, it's either a notification or request
-        if let Some(method) = raw.method {
-            if raw.id.is_none() {
-                return Ok(JsonRpcMessage::Notification(JsonRpcNotification {
-                    jsonrpc: raw.jsonrpc,
-                    method,
-                    params: raw.params,
-                }));
-            }
-
-            return Ok(JsonRpcMessage::Request(JsonRpcRequest {
-                jsonrpc: raw.jsonrpc,
-                id: raw.id,
-                method,
-                params: raw.params,
-            }));
-        }
-
-        // If we have no method and no result/error, it's a nil response
-        if raw.id.is_none() && raw.result.is_none() && raw.error.is_none() {
-            return Ok(JsonRpcMessage::Nil);
-        }
-
-        // If we get here, something is wrong with the message
-        Err(format!(
-            "Invalid JSON-RPC message format: id={:?}, method={:?}, result={:?}, error={:?}",
-            raw.id, raw.method, raw.result, raw.error
-        ))
     }
 }
 
@@ -236,54 +192,3 @@ pub struct GetPromptResult {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EmptyResult {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_notification_conversion() {
-        let raw = JsonRpcRaw {
-            jsonrpc: "2.0".to_string(),
-            id: None,
-            method: Some("notify".to_string()),
-            params: Some(json!({"key": "value"})),
-            result: None,
-            error: None,
-        };
-
-        let message = JsonRpcMessage::try_from(raw).unwrap();
-        match message {
-            JsonRpcMessage::Notification(n) => {
-                assert_eq!(n.jsonrpc, "2.0");
-                assert_eq!(n.method, "notify");
-                assert_eq!(n.params.unwrap(), json!({"key": "value"}));
-            }
-            _ => panic!("Expected Notification"),
-        }
-    }
-
-    #[test]
-    fn test_request_conversion() {
-        let raw = JsonRpcRaw {
-            jsonrpc: "2.0".to_string(),
-            id: Some(1),
-            method: Some("request".to_string()),
-            params: Some(json!({"key": "value"})),
-            result: None,
-            error: None,
-        };
-
-        let message = JsonRpcMessage::try_from(raw).unwrap();
-        match message {
-            JsonRpcMessage::Request(r) => {
-                assert_eq!(r.jsonrpc, "2.0");
-                assert_eq!(r.id, Some(1));
-                assert_eq!(r.method, "request");
-                assert_eq!(r.params.unwrap(), json!({"key": "value"}));
-            }
-            _ => panic!("Expected Request"),
-        }
-    }
-}

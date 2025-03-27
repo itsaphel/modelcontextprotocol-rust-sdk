@@ -54,6 +54,9 @@ pub enum RouterError {
 
     #[error("Not found: {0}")]
     PromptNotFound(String),
+
+    #[error("This implementation doesn't support message type: {0}")]
+    Unsupported(String),
 }
 
 impl From<RouterError> for mcp_core::protocol::ErrorData {
@@ -86,6 +89,11 @@ impl From<RouterError> for mcp_core::protocol::ErrorData {
                 data: None,
             },
             RouterError::PromptNotFound(msg) => ErrorData {
+                code: INVALID_REQUEST,
+                message: msg,
+                data: None,
+            },
+            RouterError::Unsupported(msg) => ErrorData {
                 code: INVALID_REQUEST,
                 message: msg,
                 data: None,

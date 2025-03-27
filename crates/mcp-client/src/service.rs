@@ -1,5 +1,6 @@
 use futures::future::BoxFuture;
-use mcp_core::protocol::JsonRpcMessage;
+use mcp_core::protocol::JsonRpcResponse;
+use mcp_core::transport::SendableMessage;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{timeout::Timeout, Service, ServiceBuilder};
@@ -20,11 +21,11 @@ impl<T: TransportHandle> McpService<T> {
     }
 }
 
-impl<T> Service<JsonRpcMessage> for McpService<T>
+impl<T> Service<SendableMessage> for McpService<T>
 where
     T: TransportHandle + Send + Sync + 'static,
 {
-    type Response = JsonRpcMessage;
+    type Response = Option<JsonRpcResponse>;
     type Error = Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -33,7 +34,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: JsonRpcMessage) -> Self::Future {
+    fn call(&mut self, request: SendableMessage) -> Self::Future {
         let transport = self.inner.clone();
         Box::pin(async move { transport.send(request).await })
     }

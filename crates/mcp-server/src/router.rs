@@ -16,6 +16,7 @@ use mcp_core::{
         PromptsCapability, ReadResourceResult, ResourcesCapability, ServerCapabilities,
         ToolsCapability,
     },
+    transport::SendableMessage,
     ResourceContents,
 };
 use serde_json::Value;
@@ -100,16 +101,6 @@ pub trait Router: 'static {
     fn list_prompts(&self) -> Vec<Prompt>;
     fn get_prompt(&self, prompt_name: &str) -> PromptFuture;
 
-    // Helper method to create base response
-    fn create_response(&self, id: Option<u64>) -> JsonRpcResponse {
-        JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: None,
-        }
-    }
-
     fn handle_initialize(
         &self,
         req: JsonRpcRequest,
@@ -125,12 +116,9 @@ pub trait Router: 'static {
                 instructions: Some(self.instructions()),
             };
 
-            let mut response = self.create_response(req.id);
-            response.result =
-                Some(serde_json::to_value(result).map_err(|e| {
-                    RouterError::Internal(format!("JSON serialization error: {}", e))
-                })?);
-
+            let result = serde_json::to_value(result)
+                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -146,12 +134,9 @@ pub trait Router: 'static {
                 tools,
                 next_cursor: None,
             };
-            let mut response = self.create_response(req.id);
-            response.result =
-                Some(serde_json::to_value(result).map_err(|e| {
-                    RouterError::Internal(format!("JSON serialization error: {}", e))
-                })?);
-
+            let result = serde_json::to_value(result)
+                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -183,12 +168,9 @@ pub trait Router: 'static {
                 },
             };
 
-            let mut response = self.create_response(req.id);
-            response.result =
-                Some(serde_json::to_value(result).map_err(|e| {
-                    RouterError::Internal(format!("JSON serialization error: {}", e))
-                })?);
-
+            let result = serde_json::to_value(result)
+                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -204,12 +186,9 @@ pub trait Router: 'static {
                 resources,
                 next_cursor: None,
             };
-            let mut response = self.create_response(req.id);
-            response.result =
-                Some(serde_json::to_value(result).map_err(|e| {
-                    RouterError::Internal(format!("JSON serialization error: {}", e))
-                })?);
-
+            let result = serde_json::to_value(result)
+                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -238,12 +217,9 @@ pub trait Router: 'static {
                 }],
             };
 
-            let mut response = self.create_response(req.id);
-            response.result =
-                Some(serde_json::to_value(result).map_err(|e| {
-                    RouterError::Internal(format!("JSON serialization error: {}", e))
-                })?);
-
+            let result = serde_json::to_value(result)
+                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -257,12 +233,9 @@ pub trait Router: 'static {
 
             let result = ListPromptsResult { prompts };
 
-            let mut response = self.create_response(req.id);
-            response.result =
-                Some(serde_json::to_value(result).map_err(|e| {
-                    RouterError::Internal(format!("JSON serialization error: {}", e))
-                })?);
-
+            let result = serde_json::to_value(result)
+                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -379,14 +352,12 @@ pub trait Router: 'static {
             )];
 
             // Build the final response
-            let mut response = self.create_response(req.id);
-            response.result = Some(
-                serde_json::to_value(GetPromptResult {
-                    description: Some(description_filled),
-                    messages,
-                })
-                .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?,
-            );
+            let result = serde_json::to_value(GetPromptResult {
+                description: Some(description_filled),
+                messages,
+            })
+            .map_err(|e| RouterError::Internal(format!("JSON serialization error: {}", e)))?;
+            let response = JsonRpcResponse::success(req.id, result);
             Ok(response)
         }
     }
@@ -394,11 +365,11 @@ pub trait Router: 'static {
 
 pub struct RouterService<T>(pub T);
 
-impl<T> Service<JsonRpcRequest> for RouterService<T>
+impl<T> Service<SendableMessage> for RouterService<T>
 where
     T: Router + Clone + 'static,
 {
-    type Response = JsonRpcResponse;
+    type Response = Option<JsonRpcResponse>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
@@ -406,26 +377,32 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: JsonRpcRequest) -> Self::Future {
+    fn call(&mut self, req: SendableMessage) -> Self::Future {
         let this = self.0.clone();
 
         Box::pin(async move {
-            let result = match req.method.as_str() {
-                "initialize" => this.handle_initialize(req).await,
-                "tools/list" => this.handle_tools_list(req).await,
-                "tools/call" => this.handle_tools_call(req).await,
-                "resources/list" => this.handle_resources_list(req).await,
-                "resources/read" => this.handle_resources_read(req).await,
-                "prompts/list" => this.handle_prompts_list(req).await,
-                "prompts/get" => this.handle_prompts_get(req).await,
-                _ => {
-                    let mut response = this.create_response(req.id);
-                    response.error = Some(RouterError::MethodNotFound(req.method).into());
-                    Ok(response)
-                }
-            };
+            if let SendableMessage::Request(req) = req {
+                let result = match req.method.as_str() {
+                    "initialize" => this.handle_initialize(req).await,
+                    "tools/list" => this.handle_tools_list(req).await,
+                    "tools/call" => this.handle_tools_call(req).await,
+                    "resources/list" => this.handle_resources_list(req).await,
+                    "resources/read" => this.handle_resources_read(req).await,
+                    "prompts/list" => this.handle_prompts_list(req).await,
+                    "prompts/get" => this.handle_prompts_get(req).await,
+                    _ => {
+                        let response = JsonRpcResponse::error(
+                            req.id,
+                            RouterError::MethodNotFound(req.method).into(),
+                        );
+                        Ok(response)
+                    }
+                };
 
-            result.map_err(BoxError::from)
+                result.map(Some).map_err(BoxError::from)
+            } else {
+                return Err(RouterError::Unsupported("Unsupported message type.".into()).into());
+            }
         })
     }
 }
